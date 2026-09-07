@@ -1,0 +1,6 @@
+﻿# Git Satır Sonu ve LF/CRLF Standartları
+* text=auto eol=lf
+*.pt binary
+*.onnx binary
+*.npz binary
+*.fits binary

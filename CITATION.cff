@@ -1,0 +1,10 @@
+﻿cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: "OSTE-MoE Research Consortium"
+    given-names: "Autonomous Exoplanet Discovery Team"
+title: "OSTE-MoE: Hierarchical Multi-Modal Mixture-of-Experts Exoplanet Discovery Engine"
+version: 1.0.0
+date-released: 2026-09-07
+url: "https://github.com/OSTE-MoE/OSTE-MoE"
+license: "MIT"
