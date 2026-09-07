@@ -1,0 +1,33 @@
+﻿# Python & Byte-compiled
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Dağıtım ve Paketleme
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Önbellek ve Geçici Dosyalar
+.pytest_cache/
+.coverage
+htmlcov/
+_CACHE_*
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
