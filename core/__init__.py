@@ -7,9 +7,12 @@ from .atmosphere_expert import AtmosphericInversionExpert
 from .characterization import characterize_discovered_planet
 from .transit_fitter import fit_transit_parameters
 from .dossier_generator import generate_aas_latex_table, generate_observer_briefing
-from .pipeline import OSTE_MoE_Pipeline
+from .pipeline import OSTE_MoE_Pipeline, OSTE_MoE_AutonomousDiscoveryPipeline
+from .gpu_peeling_search import GPUPeelingSearchEngine
+from .fast_analytic_solver import fast_gpu_analytic_solver
+from .micro_atmosphere_engine import MicrosecondAtmosphereEngine
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 __all__ = [
     "AstroNetHQ",
     "AstrometricCentroidExpert",
@@ -20,5 +23,9 @@ __all__ = [
     "fit_transit_parameters",
     "generate_aas_latex_table",
     "generate_observer_briefing",
-    "OSTE_MoE_Pipeline"
+    "OSTE_MoE_Pipeline",
+    "OSTE_MoE_AutonomousDiscoveryPipeline",
+    "GPUPeelingSearchEngine",
+    "fast_gpu_analytic_solver",
+    "MicrosecondAtmosphereEngine"
 ]
