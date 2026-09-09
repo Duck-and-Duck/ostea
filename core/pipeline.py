@@ -14,11 +14,6 @@ from .fast_analytic_solver import fast_gpu_analytic_solver
 from .micro_atmosphere_engine import MicrosecondAtmosphereEngine
 
 class OSTE_MoE_Pipeline:
-    """
-    OSTE-MoE Birleşik Master Boru Hattı.
-    Hem tekil aday doğrulama ('process_candidate') hem de sıfır ön bilgili
-    çoklu gezegen keşfi ve mikrosaniye atmosfer çıkarımı ('discover_and_characterize_system') yapar.
-    """
     def __init__(self, device="cuda"):
         self.device = device if torch.cuda.is_available() else "cpu"
         self.gate = RobustAnomalyGate()
@@ -37,6 +32,7 @@ class OSTE_MoE_Pipeline:
     def process_candidate(self, time_arr, flux_arr, period, t0, duration, img_oot=None, img_in=None, star_params=None):
         t_start = time.perf_counter()
         
+        # 1. ANOMALY GATE
         gate_res = self.gate.inspect(flux_arr)
         if not gate_res["has_anomaly"]:
             return {
@@ -46,6 +42,37 @@ class OSTE_MoE_Pipeline:
                 "latency_ms": (time.perf_counter() - t_start) * 1000.0
             }
 
+        # 2. GPU PREFIX-SUM KATLAMA
+        t_gpu = torch.tensor(time_arr, dtype=torch.float32, device=self.device)
+        f_gpu = torch.tensor(flux_arr, dtype=torch.float32, device=self.device)
+        g, l, d_meas = gpu_fast_fold(t_gpu, f_gpu, period, t0, duration, device=self.device)
+
+        # 3. 1D-CNN ASTRONET-HQ
+        dummy_batch_g = g.half().repeat(256, 1, 1)
+        dummy_batch_l = l.half().repeat(256, 1, 1)
+        with torch.no_grad():
+            prob_ai = torch.sigmoid(self.model(dummy_batch_g, dummy_batch_l))[0].item()
+
+        # 4. ANALİTİK TRANSİT UYDURMA
+        win_local = duration * 2.0
+        phase_local = np.linspace(-win_local, win_local, 61)
+        flux_local = l.cpu().numpy().flatten()
+        f_scale = 1.0 - (d_meas * (flux_local - np.max(flux_local)) / (np.min(flux_local) - np.max(flux_local) + 1e-7))
+        fit_res = fit_transit_parameters(phase_local, f_scale, d_meas, duration)
+        d_final = fit_res["depth_fit"]
+
+        # 5. ASTROFİZİKSEL KARAR AĞACI (SIRALAMA DÜZELTİLDİ)
+        # Transit sinyali yoksa doğrudan NON_PLANET!
+        if d_meas < 0.00018 or d_final < 0.00018 or prob_ai < 0.20:
+            return {
+                "decision": "NON_PLANET",
+                "reason": "NO_SIGNIFICANT_TRANSIT",
+                "measured_depth": d_final,
+                "confidence": prob_ai,
+                "latency_ms": (time.perf_counter() - t_start) * 1000.0
+            }
+
+        # Yalnızca geçerli transit varsa astrometriyi test et
         passed_astrometry = True
         centroid_rep = None
         if img_oot is not None and img_in is not None:
@@ -59,25 +86,10 @@ class OSTE_MoE_Pipeline:
                     "latency_ms": (time.perf_counter() - t_start) * 1000.0
                 }
 
-        t_gpu = torch.tensor(time_arr, dtype=torch.float32, device=self.device)
-        f_gpu = torch.tensor(flux_arr, dtype=torch.float32, device=self.device)
-        g, l, d_meas = gpu_fast_fold(t_gpu, f_gpu, period, t0, duration, device=self.device)
-
-        dummy_batch_g = g.half().repeat(256, 1, 1)
-        dummy_batch_l = l.half().repeat(256, 1, 1)
-        with torch.no_grad():
-            prob_ai = torch.sigmoid(self.model(dummy_batch_g, dummy_batch_l))[0].item()
-
-        win_local = duration * 2.0
-        phase_local = np.linspace(-win_local, win_local, 61)
-        flux_local = l.cpu().numpy().flatten()
-        f_scale = 1.0 - (d_meas * (flux_local - np.max(flux_local)) / (np.min(flux_local) - np.max(flux_local) + 1e-7))
-        fit_res = fit_transit_parameters(phase_local, f_scale, d_meas, duration)
-        d_final = fit_res["depth_fit"]
-
+        # Nihai Karar
         if d_final >= 0.028:
             final_cls = "BINARY"
-        elif prob_ai >= 0.35 and 0.00015 <= d_final < 0.025 and passed_astrometry:
+        elif prob_ai >= 0.35 and 0.00018 <= d_final < 0.028 and passed_astrometry:
             final_cls = "PLANET"
         else:
             final_cls = "NON_PLANET"
@@ -163,5 +175,4 @@ class OSTE_MoE_Pipeline:
             "total_latency_ms": total_lat_ms
         }
 
-# İki yönlü tam geriye dönük uyumluluk takma adı (Alias)
 OSTE_MoE_AutonomousDiscoveryPipeline = OSTE_MoE_Pipeline

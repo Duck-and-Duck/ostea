@@ -5,9 +5,9 @@ import numpy as np
 
 class AtmosphericInversionExpert:
     """
-    Katman 4: Prior-Clamped Termodinamik SBI Normalizing Flow Motoru.
-    Sıcaklık öncülünü modelin eğitildiği [850 K, 1750 K] destek aralığına kenetler;
-    rejection sampling ret döngülerini ve uyarılarını sıfırlar (<15 ms çıkarım).
+    Katman 4: Prior-Clamped Hızlı Termodinamik SBI Normalizing Flow Motoru.
+    Girdileri [950 K, 1500 K] ve log g [4.3, 4.7] aralığına kenetleyerek
+    rejection sampling ret döngülerini ve uyarılarını sıfırlar (<15 ms).
     """
     def __init__(self, weights_path=None, device="cuda"):
         self.device = device if torch.cuda.is_available() else "cpu"
@@ -24,11 +24,11 @@ class AtmosphericInversionExpert:
     def retrieve_atmosphere(self, depth, gravity=4.5, teq_prior=None):
         t0 = time.perf_counter()
         
-        # Fiziksel denge sıcaklığı
         phys_teq = teq_prior if teq_prior is not None else float(1200.0 * (depth / 0.01)**0.25)
         
-        # Simülatör destek aralığına kenetle (Rejection sampling çöküşünü önler)
-        sim_temp = float(np.clip(phys_teq, 850.0, 1750.0))
+        # Simülatör eğitim manifolduna kenetle (Rejection sampling çöküşünü önler)
+        sim_temp = float(np.clip(phys_teq, 950.0, 1500.0))
+        sim_grav = float(np.clip(gravity, 4.3, 4.7))
 
         if self.model is not None and os.path.exists(os.path.join(os.path.dirname(__file__), "simulator_300ch.py")):
             from .simulator_300ch import extract_features, generate_base_spectrum
@@ -37,15 +37,13 @@ class AtmosphericInversionExpert:
                 "log_co": -3.60, "log_ch4": -6.50, "temp": sim_temp,
                 "d_base": max(0.015, min(0.025, depth))
             }
-            spec_wave = generate_base_spectrum(calibrated_p, gravity, log_pcloud=1.0, device=self.device) + torch.randn(300, device=self.device) * 2.2e-5
-            x_in = extract_features(spec_wave, torch.tensor([[gravity]], device=self.device))
+            spec_wave = generate_base_spectrum(calibrated_p, sim_grav, log_pcloud=1.0, device=self.device) + torch.randn(300, device=self.device) * 1.5e-5
+            x_in = extract_features(spec_wave, torch.tensor([[sim_grav]], device=self.device))
             
             with torch.no_grad():
-                # Örnekleme doğrudan yapılabilir
                 samples = self.model.sample((10,), x=x_in, show_progress_bars=False)
             
             t_sbi = float(torch.median(samples[:, 5]).item())
-            # Termodinamik öncülle harmanla
             t_final = float(0.85 * phys_teq + 0.15 * (t_sbi * (phys_teq / sim_temp)))
             h2o_pred = float(torch.median(samples[:, 0]).item())
             co2_pred = float(torch.median(samples[:, 1]).item())
