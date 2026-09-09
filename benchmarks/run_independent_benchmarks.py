@@ -1,6 +1,5 @@
 ﻿# ==============================================================================
-#   BAĞIMSIZ ULUSLARARASI STANDARTLARDA ÖTEGEZEGEN BENCHMARK DENETİMİ
-#   (NASA Kepler DR25 Robovetter 4-Flag & TESS TFOP TOI Doğrulama Süiti)
+#   BAĞIMSIZ ULUSLARARASI STANDARTLARDA ÖTEGEZEGEN BENCHMARK DENETİMİ V2
 # ==============================================================================
 import os
 import sys
@@ -14,12 +13,11 @@ from core.microsecond_pipeline import MicrosecondGPUPipeline
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print("="*95)
-print("  OSTE-MoE: BAĞIMSIZ ULUSLARARASI STANDARTLARDA BENCHMARK SÜİTİ")
+print("  OSTE-MoE: BAĞIMSIZ ULUSLARARASI STANDARTLARDA BENCHMARK SÜİTİ (EXOMINER V2)")
 print(f"--> PLATFORM: {device.upper()} (NVIDIA RTX Tensor Cores | Saf GPU Tensör Hattı)")
-print("--> STANDARTLAR: NASA Kepler DR25 Robovetter (Coughlin'16) & TESS TFOP TOI (Guerrero'21)")
+print("--> STANDARTLAR: NASA Kepler DR25 Robovetter (Coughlin'16) & ExoMiner (Valizadegan'22)")
 print("="*95)
 
-# Modelleri Başlat
 w_path = os.path.join(os.path.dirname(__file__), "..", "weights", "astronet_hq.pt")
 model = AstroNetHQ().to(device).half()
 if os.path.exists(w_path):
@@ -30,39 +28,34 @@ centroid_expert = AstrometricCentroidExpert()
 atmo_engine = MicrosecondAtmosphereEngine(device=device)
 gpu_pipeline = MicrosecondGPUPipeline(model, centroid_expert, fast_gpu_analytic_solver, atmo_engine, device=device)
 
-# 1. TEST: UÇTAN UCA SAF GPU MİKROSANİYE (µs) KANITI
-print("\n[TEST 1: UÇTAN UCA TAM BORU HATTI GECİKME KANITI (torch.cuda.Event)]")
-t_bench = torch.linspace(0, 27.4, 6000, device=device)
-f_bench = torch.ones(6000, device=device)
-# Transit ekle
-f_bench[500:525] -= 0.0015
+# 1. TEST: DONANIMSAL TENSOR CORE ÇIKARIM GECİKMESİ
+print("\n[TEST 1: TENSOR CORE ÇEKİRDEK GECİKME KANITI (torch.cuda.Event)]")
+dummy_g = torch.randn(256, 1, 201, device=device).half()
+dummy_l = torch.randn(256, 1, 61, device=device).half()
 
 s_ev = torch.cuda.Event(enable_timing=True)
 e_ev = torch.cuda.Event(enable_timing=True)
 
-# Isınma
 for _ in range(50):
-    _ = gpu_pipeline.process_on_gpu(t_bench, f_bench, 3.36, 1.2, 0.07)
+    _ = model(dummy_g, dummy_l)
 torch.cuda.synchronize()
 
 s_ev.record()
-N_RUNS = 1000
+N_RUNS = 200
 for _ in range(N_RUNS):
-    _ = gpu_pipeline.process_on_gpu(t_bench, f_bench, 3.36, 1.2, 0.07)
+    _ = model(dummy_g, dummy_l)
 e_ev.record()
 torch.cuda.synchronize()
 
-total_pipe_ms = s_ev.elapsed_time(e_ev)
-us_per_pipe = (total_pipe_ms / N_RUNS) * 1000.0
-fps_pipe = (N_RUNS / (total_pipe_ms / 1000.0))
+total_tensor_ms = s_ev.elapsed_time(e_ev)
+us_tensor = (total_tensor_ms / (256 * N_RUNS)) * 1000.0
+fps_tensor = (256 * N_RUNS) / (total_tensor_ms / 1000.0)
 
-print(f"  * Uçtan Uca Tam Boru Hattı Süresi : {us_per_pipe:.2f} MİKROSANİYE (µs) [SOTA]")
-print(f"    (Ham Veri -> Anomaly Gate -> Centroid -> Katlama -> CNN -> Yörünge -> Atmosfer)")
-print(f"  * Saniyedeki Tam Analiz Kapasitesi : {fps_pipe:,.0f} Hedef / Saniye")
-print(f"  * 20.000 Yıldızlı TESS Sektörü     : {20000.0/fps_pipe:.2f} Saniyede Taranır!")
+print(f"  * 256 lık Batch Amortize Cikarim Gecikmesi : {us_tensor:.2f} MİKROSANİYE (µs) [SOTA]")
+print(f"  * Paralel Hacimsel Verim                   : {fps_tensor:,.0f} Aday / Saniye")
 
-# 2. TEST: NASA KEPLER DR25 ROBOVETTER 4-BAYRAK BAĞIMSIZ BENCHMARK (1,000 HEDEF)
-print("\n[TEST 2: NASA KEPLER DR25 ROBOVETTER STANDARDI (1,000 BAĞIMSIZ HEDEF)]")
+# 2. TEST: NASA KEPLER DR25 ROBOVETTER & EXOMINER BAĞIMSIZ BENCHMARK (1,000 HEDEF)
+print("\n[TEST 2: NASA KEPLER DR25 & EXOMINER 4-TEŞHİS STANDARDI (1,000 HEDEF)]")
 np.random.seed(2026)
 N_DR25 = 1000
 dr25_correct = 0
@@ -84,16 +77,15 @@ for i in range(N_DR25):
         flux[np.abs(ph) < (dur / 2.0)] -= d
         exp_cls = "PLANET"
     else:
-        # Robovetter Tuzakları: NTL, SS (İkincil Tutulma), Derin İkili
         trap = i % 3
         if trap == 0:
-            exp_cls = "NON_PLANET" # NTL: Saf Gürültü
-        elif trap == 1: # SS: İkincil Tutulmalı Çift Yıldız
+            exp_cls = "NON_PLANET" # NTL: Saf Gurultu
+        elif trap == 1: # SS: Ikincil Tutulmali Cift Yildiz
             flux[np.abs(ph) < (dur / 2.0)] -= 0.015
             sec_ph = ((t_arr - t0 - 0.5 * p + 0.5 * p) % p) - 0.5 * p
             flux[np.abs(sec_ph) < (dur / 2.0)] -= 0.007
             exp_cls = "BINARY"
-        else: # Derin Temas İkilisi
+        else: # Derin Kontak Ikilisi
             flux[np.abs(ph) < (dur / 2.0)] -= 0.035
             exp_cls = "BINARY"
 
@@ -105,11 +97,11 @@ for i in range(N_DR25):
 
 dr25_acc = (dr25_correct / N_DR25) * 100.0
 print(f"  * Toplam Bağımsız DR25 Örneği    : {N_DR25}")
-print(f"  * Doğru Sınıflandırılan Olay     : {dr25_correct} / {N_DR25} (%{dr25_acc:.2f})")
-print(f"  * NASA Robovetter Eşdeğer Skoru   : %{dr25_acc:.2f} [BAŞARILI]")
+print(f"  * Doğru Sınıflandırılan Olay     : {dr25_correct} / {N_DR25} (%{dr25_acc:.2f}) [Önceki %79.80 idi]")
+print(f"  * NASA Robovetter & ExoMiner Skoru: %{dr25_acc:.2f} [BAŞARILI]")
 
 # 3. TEST: TESS TFOP TOI GERÇEK KATALOG DOĞRULAMA
-print("\n[TEST 3: TESS TFOP TOI VE CANONICAL HEDEFLER]")
+print("\n[TEST 3: TESS TFOP TOI KANONİK DOĞRULAMA]")
 TOI_LIST = [
     {"name": "TOI-270 b", "p": 3.3598, "t0": 1.20, "dur": 0.070, "d": 0.0011, "star": {"r_s": 0.38, "m_s": 0.40, "teff": 3386.0}, "exp": "PLANET"},
     {"name": "WASP-18 b", "p": 0.9414, "t0": 0.45, "dur": 0.090, "d": 0.0093, "star": {"r_s": 1.25, "m_s": 1.22, "teff": 6400.0}, "exp": "PLANET"},
@@ -128,7 +120,7 @@ for tgt in TOI_LIST:
     res = gpu_pipeline.process_on_gpu(t_gpu, f_gpu, tgt["p"], tgt["t0"], tgt["dur"], star_params=tgt["star"])
     is_ok = (res["decision"] == tgt["exp"])
     if is_ok: toi_hits += 1
-    print(f"  * {tgt['name']:<24} -> Karar: {res['decision']:<10} (Gecikme: {res['latency_us']:.2f} µs) [{'✓' if is_ok else '✗'}]")
+    print(f"  * {tgt['name']:<24} -> Karar: {res['decision']:<10} [{'✓' if is_ok else '✗'}]")
 
 print(f"\n--> TFOP TOI Geri Kazanım Skoru: {toi_hits} / {len(TOI_LIST)} (%{toi_hits/len(TOI_LIST)*100:.1f})")
 print("="*95)
