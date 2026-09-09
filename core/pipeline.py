@@ -26,18 +26,20 @@ class OSTE_MoE_Pipeline:
             self.model.load_state_dict(torch.load(w_path, map_location=self.device))
         self.model.eval()
 
-        # CUDA Sürücü ve Bellek Isınması (WDDM 1.2s cold-start gecikmesini sıfırlar)
+        # EKSİKSİZ CUDA KERNEL ISINMASI (Tüm searchsorted ve Tensor Core gecikmelerini sıfırlar)
         if self.device == "cuda":
             dummy_g = torch.randn(256, 1, 201, device=self.device).half()
             dummy_l = torch.randn(256, 1, 61, device=self.device).half()
+            dummy_t = torch.linspace(0, 27.4, 6000, device=self.device)
+            dummy_f = torch.ones(6000, device=self.device)
             with torch.no_grad():
                 _ = self.model(dummy_g, dummy_l)
+                _ = gpu_fast_fold(dummy_t, dummy_f, 3.0, 1.0, 0.1, device=self.device)
             torch.cuda.synchronize()
 
     def process_candidate(self, time_arr, flux_arr, period, t0, duration, img_oot=None, img_in=None, star_params=None):
         t_start = time.perf_counter()
         
-        # 1. ANOMALY GATE
         gate_res = self.gate.inspect(flux_arr)
         if not gate_res["has_anomaly"]:
             return {
@@ -47,18 +49,15 @@ class OSTE_MoE_Pipeline:
                 "latency_ms": (time.perf_counter() - t_start) * 1000.0
             }
 
-        # 2. GPU PREFIX-SUM KATLAMA (<50 µs)
         t_gpu = torch.tensor(time_arr, dtype=torch.float32, device=self.device)
         f_gpu = torch.tensor(flux_arr, dtype=torch.float32, device=self.device)
         g, l, d_meas = gpu_fast_fold(t_gpu, f_gpu, period, t0, duration, device=self.device)
 
-        # 3. 1D-CNN ASTRONET-HQ (~3.1 µs)
         dummy_batch_g = g.half().repeat(256, 1, 1)
         dummy_batch_l = l.half().repeat(256, 1, 1)
         with torch.no_grad():
             prob_ai = torch.sigmoid(self.model(dummy_batch_g, dummy_batch_l))[0].item()
 
-        # 4. HIZLI GPU ANALİTİK ÇÖZÜCÜ (~2.5 µs)
         r_s = star_params.get("r_s", 1.0) if star_params else 1.0
         m_s = star_params.get("m_s", 1.0) if star_params else 1.0
         teff = star_params.get("teff", 5778.0) if star_params else 5778.0
@@ -66,7 +65,6 @@ class OSTE_MoE_Pipeline:
         phys_fast = fast_gpu_analytic_solver(period, d_meas, duration, r_star=r_s, m_star=m_s, teff=teff, device=self.device)
         d_final = d_meas
 
-        # Transit derinliği yoksa derhal NON_PLANET
         if d_final < 0.00018 or prob_ai < 0.20:
             return {
                 "decision": "NON_PLANET",
@@ -76,7 +74,6 @@ class OSTE_MoE_Pipeline:
                 "latency_ms": (time.perf_counter() - t_start) * 1000.0
             }
 
-        # 5. 2D ASTROMETRİK CENTROID
         passed_astrometry = True
         centroid_rep = None
         if img_oot is not None and img_in is not None:
@@ -90,7 +87,6 @@ class OSTE_MoE_Pipeline:
                     "latency_ms": (time.perf_counter() - t_start) * 1000.0
                 }
 
-        # 6. KARAR VE MİKROSANİYE ATMOSFER ÇIKARIMI (<5 µs)
         if d_final >= 0.028:
             final_cls = "BINARY"
         elif prob_ai >= 0.35 and 0.00018 <= d_final < 0.028 and passed_astrometry:
