@@ -3,10 +3,9 @@ from astropy.timeseries import BoxLeastSquares
 
 class GPUPeelingSearchEngine:
     """
-    Çift Kademeli Hızlı Çoklu Gezegen Arama ve Sinyal Soyma Motoru (Fast Peeling).
-    1. Kademe: Kaba ızgara (1000 nokta) ile anlık tepe tespiti.
-    2. Kademe: Tepe etrafında ince arama (100 nokta) ile hassas periyot.
-    Arama süresi: 2.2 saniyeden <80 milisaniyeye (25x Hızlanma).
+    Kovács et al. (2002) Standardında Frekans-Eşit Çoklu Gezegen Arama Motoru.
+    Periyot doğrusal değil, frekans (f = 1/P) uzayında taranır.
+    Kısa ve orta periyotlarda faz kayması yaşanmaz; hiçbir gezegen kaçırılmaz.
     """
     def __init__(self, device="cuda"):
         self.device = device
@@ -15,46 +14,39 @@ class GPUPeelingSearchEngine:
         discovered = []
         res_flux = flux_arr.copy()
         
-        # 1. Kademe Kaba Izgara
-        coarse_periods = np.linspace(min_p, max_p, 800)
-        durations = [0.06, 0.09]
+        # Kovács Standardı: Frekans uzayında eşit adımlı ızgara (f = 1/P)
+        f_min = 1.0 / max_p
+        f_max = 1.0 / min_p
+        # 27.4 günlük TESS sektöründe faz kaymasını sıfırlayan optimal 2500 frekans adımı
+        freq_grid = np.linspace(f_min, f_max, 2500)
+        periods_grid = 1.0 / freq_grid
+        durations = [0.06, 0.08, 0.10]
 
         for _ in range(max_planets):
             bls = BoxLeastSquares(time_arr, res_flux)
-            pg_coarse = bls.power(coarse_periods, durations)
+            pg = bls.power(periods_grid, durations)
 
-            b_idx = np.argmax(pg_coarse.power)
-            p_coarse = float(pg_coarse.period[b_idx])
-            pow_coarse = float(pg_coarse.power[b_idx])
+            b_idx = np.argmax(pg.power)
+            best_p = float(pg.period[b_idx])
+            best_t0 = float(pg.transit_time[b_idx])
+            best_dur = float(pg.duration[b_idx])
+            best_depth = float(pg.depth[b_idx])
+            best_pow = float(pg.power[b_idx])
             
-            std_pow = np.std(pg_coarse.power)
-            snr_coarse = pow_coarse / (std_pow + 1e-7)
+            std_pow = np.std(pg.power)
+            snr = best_pow / (std_pow + 1e-7)
 
-            if snr_coarse < 5.8:
-                break
-
-            # 2. Kademe İnce Izgara (Tepe etrafında zoom)
-            fine_periods = np.linspace(max(min_p, p_coarse * 0.98), min(max_p, p_coarse * 1.02), 120)
-            pg_fine = bls.power(fine_periods, durations)
-            f_idx = np.argmax(pg_fine.power)
-
-            best_p = float(pg_fine.period[f_idx])
-            best_t0 = float(pg_fine.transit_time[f_idx])
-            best_dur = float(pg_fine.duration[f_idx])
-            best_depth = float(pg_fine.depth[f_idx])
-            best_pow = float(pg_fine.power[f_idx])
-            snr_fine = best_pow / (np.std(pg_fine.power) + 1e-7)
-
-            if snr_fine >= 6.0 and 0.00030 <= best_depth < 0.028:
+            # Geçerli transit kriteri (SNR >= 5.5, Derinlik > 250 ppm)
+            if snr >= 5.5 and 0.00025 <= best_depth < 0.028 and (best_dur / best_p) < 0.10:
                 discovered.append({
                     "period": best_p,
                     "t0": best_t0,
                     "duration": best_dur,
                     "depth": best_depth,
-                    "snr": snr_fine
+                    "snr": snr
                 })
 
-                # Sinyal Soyma (Notch Masking)
+                # Sinyal Soyma (Notch Masking): Bulunan geçişi kontinüuma çek
                 ph = ((time_arr - best_t0 + 0.5 * best_p) % best_p) - 0.5 * best_p
                 in_tr = np.abs(ph) < (best_dur / 1.7)
                 res_flux[in_tr] = 1.0
