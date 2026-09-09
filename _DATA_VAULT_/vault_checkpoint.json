@@ -1,0 +1,24 @@
+{
+  "completed_tics": [
+    "TIC 100100827",
+    "TIC 259377017",
+    "TIC 307210830",
+    "TIC 441420236",
+    "TIC 25155310",
+    "TIC 260128333",
+    "TIC 339607421",
+    "TIC 48227288",
+    "TIC 261136679",
+    "TIC 410153553",
+    "TIC 98796344",
+    "TIC 415969908",
+    "TIC 120461626",
+    "TIC 52368076",
+    "TIC 38846515"
+  ],
+  "failed_tics": [],
+  "last_index": 15,
+  "total_bytes_saved": 1973863,
+  "session_start_time": 1788879323.2613,
+  "last_checkpoint_id": "Quiet Ref 1_TIC 38846515"
+}
