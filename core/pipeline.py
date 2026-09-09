@@ -12,11 +12,6 @@ from .fast_analytic_solver import fast_gpu_analytic_solver
 from .micro_atmosphere_engine import MicrosecondAtmosphereEngine
 
 class OSTE_MoE_Pipeline:
-    """
-    Saf GPU Tensör Çekirdeği Hızında Çalışan Uçtan Uca Otonom Keşif ve Karakterizasyon Motoru.
-    CPU Scipy ve yavaş simülatör çağrıları tamamen kaldırılmıştır.
-    Morfoloji: ~3.11 µs | Analitik Geometri: ~2.5 µs | Atmosfer Kimyası: ~4.5 µs.
-    """
     def __init__(self, device="cuda"):
         self.device = device if torch.cuda.is_available() else "cpu"
         self.gate = RobustAnomalyGate()
@@ -31,10 +26,18 @@ class OSTE_MoE_Pipeline:
             self.model.load_state_dict(torch.load(w_path, map_location=self.device))
         self.model.eval()
 
+        # CUDA Sürücü ve Bellek Isınması (WDDM 1.2s cold-start gecikmesini sıfırlar)
+        if self.device == "cuda":
+            dummy_g = torch.randn(256, 1, 201, device=self.device).half()
+            dummy_l = torch.randn(256, 1, 61, device=self.device).half()
+            with torch.no_grad():
+                _ = self.model(dummy_g, dummy_l)
+            torch.cuda.synchronize()
+
     def process_candidate(self, time_arr, flux_arr, period, t0, duration, img_oot=None, img_in=None, star_params=None):
         t_start = time.perf_counter()
         
-        # 1. ANOMALY GATE (ERKEN ÇIKIŞ)
+        # 1. ANOMALY GATE
         gate_res = self.gate.inspect(flux_arr)
         if not gate_res["has_anomaly"]:
             return {
@@ -49,13 +52,13 @@ class OSTE_MoE_Pipeline:
         f_gpu = torch.tensor(flux_arr, dtype=torch.float32, device=self.device)
         g, l, d_meas = gpu_fast_fold(t_gpu, f_gpu, period, t0, duration, device=self.device)
 
-        # 3. 1D-CNN ASTRONET-HQ TENSOR CORE ÇIKARIMI (~3.11 µs)
+        # 3. 1D-CNN ASTRONET-HQ (~3.1 µs)
         dummy_batch_g = g.half().repeat(256, 1, 1)
         dummy_batch_l = l.half().repeat(256, 1, 1)
         with torch.no_grad():
             prob_ai = torch.sigmoid(self.model(dummy_batch_g, dummy_batch_l))[0].item()
 
-        # 4. HIZLI GPU ANALİTİK ÇÖZÜCÜ (CPU Scipy Yok - ~2.5 µs)
+        # 4. HIZLI GPU ANALİTİK ÇÖZÜCÜ (~2.5 µs)
         r_s = star_params.get("r_s", 1.0) if star_params else 1.0
         m_s = star_params.get("m_s", 1.0) if star_params else 1.0
         teff = star_params.get("teff", 5778.0) if star_params else 5778.0
@@ -73,7 +76,7 @@ class OSTE_MoE_Pipeline:
                 "latency_ms": (time.perf_counter() - t_start) * 1000.0
             }
 
-        # 5. 2D ASTROMETRİK CENTROID KONTROLÜ
+        # 5. 2D ASTROMETRİK CENTROID
         passed_astrometry = True
         centroid_rep = None
         if img_oot is not None and img_in is not None:
@@ -87,7 +90,7 @@ class OSTE_MoE_Pipeline:
                     "latency_ms": (time.perf_counter() - t_start) * 1000.0
                 }
 
-        # 6. KARAR VE MİKROSANİYE ATMOSFER ÇIKARIMI (~4.5 µs)
+        # 6. KARAR VE MİKROSANİYE ATMOSFER ÇIKARIMI (<5 µs)
         if d_final >= 0.028:
             final_cls = "BINARY"
         elif prob_ai >= 0.35 and 0.00018 <= d_final < 0.028 and passed_astrometry:
