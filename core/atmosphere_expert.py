@@ -6,8 +6,8 @@ import numpy as np
 class AtmosphericInversionExpert:
     """
     Katman 4: Prior-Clamped Hızlı Termodinamik SBI Normalizing Flow Motoru.
-    Girdileri [950 K, 1500 K] ve log g [4.3, 4.7] aralığına kenetleyerek
-    rejection sampling ret döngülerini ve uyarılarını sıfırlar (<15 ms).
+    Girdileri [950 K, 1500 K] ve log g [4.3, 4.7] aralığına kenetler;
+    başlatma anında GPU warmup yaparak soğuk başlangıç gecikmesini yok eder (<50 ms).
     """
     def __init__(self, weights_path=None, device="cuda"):
         self.device = device if torch.cuda.is_available() else "cpu"
@@ -21,12 +21,19 @@ class AtmosphericInversionExpert:
             except Exception:
                 self.model = None
 
+        # GPU / PyTorch Isınma (Warmup): İlk adaydaki 1.1s cold-start gecikmesini sıfırlar
+        if self.model is not None:
+            try:
+                dummy_x = torch.randn(1, 10, device=self.device)
+                with torch.no_grad():
+                    _ = self.model.sample((1,), x=dummy_x, show_progress_bars=False)
+            except Exception:
+                pass
+
     def retrieve_atmosphere(self, depth, gravity=4.5, teq_prior=None):
         t0 = time.perf_counter()
         
         phys_teq = teq_prior if teq_prior is not None else float(1200.0 * (depth / 0.01)**0.25)
-        
-        # Simülatör eğitim manifolduna kenetle (Rejection sampling çöküşünü önler)
         sim_temp = float(np.clip(phys_teq, 950.0, 1500.0))
         sim_grav = float(np.clip(gravity, 4.3, 4.7))
 

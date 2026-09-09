@@ -1,17 +1,12 @@
 ﻿# ==============================================================================
-#   OSTE-MoE V1.2.0 İLERİ DÜZEY TERMODİNAMİK VE BİLİMSEL AUDIT TESTİ
+#   OSTE-MoE V1.3.3 İLERİ DÜZEY TERMODİNAMİK VE ÇOKLU REJİM AUDIT RAPORU
 # ==============================================================================
 import os
 import sys
 import numpy as np
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from core import OSTE_MoE_Pipeline, generate_aas_latex_table, generate_observer_briefing
-
-print("="*90)
-print("  OSTE-MoE V1.2.0: İLERİ DÜZEY TERMODİNAMİK BAĞLAŞIM VE ÇOKLU REJİM AUDIT RAPORU")
-print("  (5 Farklı Astrofiziksel Rejim: 2400 K'den 280 K Yaşanabilir Bölgeye)")
-print("="*90)
+from core import OSTE_MoE_Pipeline
 
 pipeline = OSTE_MoE_Pipeline()
 time_pts = np.linspace(0, 27.4, 6000)
@@ -28,13 +23,13 @@ TEST_REGIMES = [
         "star": {"r_s": 1.25, "m_s": 1.22, "teff": 6400.0}, "is_beb": False, "is_q": False, "exp": "PLANET"
     },
     {
-        "name": "TOI-270 b (Süper-Dünya - Teq ~ 512 K)",
+        "name": "TOI-270 b (Ilıman Süper-Dünya - Teq ~ 512 K)",
         "p": 3.359857, "t0": 1.20, "dur": 0.070, "depth": 0.0011,
         "star": {"r_s": 0.38, "m_s": 0.40, "teff": 3386.0}, "is_beb": False, "is_q": False, "exp": "PLANET"
     },
     {
-        "name": "HZ Dünya İkizi (K-Cücesi Yaşanabilir Bölge - Teq ~ 285 K)",
-        "p": 38.45000, "t0": 8.00, "dur": 0.120, "depth": 0.0006,
+        "name": "K-Cücesi Yaşanabilir Dünya İkizi (Sıvı Su Rejimi - Teq ~ 276 K)",
+        "p": 72.50000, "t0": 14.00, "dur": 0.160, "depth": 0.00065, # a = 0.29 AU, S = 0.78 S_earth
         "star": {"r_s": 0.65, "m_s": 0.68, "teff": 4200.0}, "is_beb": False, "is_q": False, "exp": "PLANET"
     },
     {
@@ -48,6 +43,10 @@ TEST_REGIMES = [
         "star": {"r_s": 1.0, "m_s": 1.0, "teff": 5778.0}, "is_beb": False, "is_q": True, "exp": "NON_PLANET"
     }
 ]
+
+print("="*90)
+print("  OSTE-MoE V1.3.3: ÇOKLU REJİM VE TERMODİNAMİK DOĞRULAMA DENETİMİ")
+print("="*90)
 
 hits = 0
 for idx, tgt in enumerate(TEST_REGIMES, 1):
@@ -89,5 +88,5 @@ for idx, tgt in enumerate(TEST_REGIMES, 1):
         print(f"  * [JWST / RV TAKİP]: TSM = {p_prop['JWST_TSM_Score']:.1f} | K = {p_prop['RV_SemiAmplitude_m_s']:.2f} m/s")
 
 print("\n" + "="*90)
-print(f"--> OSTE-MoE V1.2.0 DENETİM SKORU: {hits} / 5 (%{hits/5.0*100:.1f})")
+print(f"--> ÇOKLU REJİM DENETİM SKORU: {hits} / 5 (%{hits/5.0*100:.1f})")
 print("=================================================================================")
